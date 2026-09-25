@@ -28,3 +28,17 @@ def macro_f05_score(true_matches, predicted_matches):
         return 0.0
 
     return sum(scores) / len(scores)
+def split_source1_ids(source1_ids, validation_fraction=0.20, random_state=42):
+    import numpy as np
+
+    source1_ids = np.array(list(source1_ids))
+
+    rng = np.random.default_rng(random_state)
+    rng.shuffle(source1_ids)
+
+    split_index = int(len(source1_ids) * (1 - validation_fraction))
+
+    train_ids = source1_ids[:split_index]
+    validation_ids = source1_ids[split_index:]
+
+    return train_ids.tolist(), validation_ids.tolist()
