@@ -1,44 +1,100 @@
 from collections import defaultdict
-
 from src.normalize import normalize_text
 
 
-def build_inverted_index(values):
-    index = defaultdict(list)
-
-    for entity_id, value in values:
-        key = normalize_text(value)
-
-        if key:
-            index[key].append(entity_id)
-
-    return dict(index)
+def tokenize(text):
+    return set(normalize_text(text).split())
 
 
-def generate_candidates(source1_rows, source2_rows):
-    name_index = build_inverted_index(
-        (row["entity_id"], row["business_name"])
-        for row in source2_rows
-    )
+def build_indexes(target_rows):
+    name_index = defaultdict(set)
+    address_index = defaultdict(set)
 
-    address_index = build_inverted_index(
-        (row["entity_id"], row["business_address"])
-        for row in source2_rows
-    )
+    name_frequency = defaultdict(int)
+    address_frequency = defaultdict(int)
 
-    candidates = {}
+    rows = list(target_rows)
 
-    for row in source1_rows:
+    # Count name-token frequencies
+    for row in rows:
+        for token in tokenize(row["business_name"]):
+            name_frequency[token] += 1
+
+    # Count address-token frequencies
+    for row in rows:
+        for token in tokenize(row["business_address"]):
+            address_frequency[token] += 1
+
+    # Ignore extremely common tokens.
+    # They create huge candidate sets and add little information.
+    allowed_name_tokens = {
+        token
+        for token, count in name_frequency.items()
+        if 2 <= count <= 1000
+    }
+
+    allowed_address_tokens = {
+        token
+        for token, count in address_frequency.items()
+        if 2 <= count <= 1000
+    }
+
+    for row in rows:
         entity_id = row["entity_id"]
 
-        candidate_ids = set()
+        name = normalize_text(row["business_name"])
+        address = normalize_text(row["business_address"])
 
-        name_key = normalize_text(row["business_name"])
-        address_key = normalize_text(row["business_address"])
+        if name:
+            name_index[name].add(entity_id)
 
-        candidate_ids.update(name_index.get(name_key, []))
-        candidate_ids.update(address_index.get(address_key, []))
+        if address:
+            address_index[address].add(entity_id)
 
-        candidates[entity_id] = candidate_ids
+    name_token_index = defaultdict(set)
+    address_token_index = defaultdict(set)
+
+    for row in rows:
+        entity_id = row["entity_id"]
+
+        for token in tokenize(row["business_name"]) & allowed_name_tokens:
+            name_token_index[token].add(entity_id)
+
+        for token in tokenize(row["business_address"]) & allowed_address_tokens:
+            address_token_index[token].add(entity_id)
+
+    return {
+        "name": dict(name_index),
+        "address": dict(address_index),
+        "name_token": dict(name_token_index),
+        "address_token": dict(address_token_index),
+    }
+
+
+def generate_candidates(source1_row, indexes):
+    candidates = set()
+
+    name = normalize_text(source1_row["business_name"])
+    address = normalize_text(source1_row["business_address"])
+
+    # Route 1: exact normalized name
+    if name:
+        candidates.update(indexes["name"].get(name, set()))
+
+    # Route 2: exact normalized address
+    if address:
+        candidates.update(indexes["address"].get(address, set()))
+
+    # Route 3: informative name tokens
+    for token in tokenize(source1_row["business_name"]):
+        candidates.update(
+            indexes["name_token"].get(token, set())
+        )
+
+    # Route 4: informative address tokens
+    for token in tokenize(source1_row["business_address"]):
+        candidates.update(
+            indexes["address_token"].get(token, set())
+        )
 
     return candidates
